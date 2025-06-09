@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE html>
+<html b:version='2' class='v2' expr:dir='data:blog.languageDirection' xmlns='http://www.w3.org/1999/xhtml' xmlns:b='http://www.google.com/2005/gml/b' xmlns:data='http://www.google.com/2005/gml/data' xmlns:expr='http://www.google.com/2005/gml/expr'>
+<head>
+    <meta charset='UTF-8'/>
+    <meta content='width=device-width, initial-scale=1.0' name='viewport'/>
+    <title><data:blog.pageTitle/></title>
+    <b:skin><![CDATA[
+        /* Blogger Theme Variables */
+        <Variable name="body.background.color" description="Body Background Color" type="color" value="#1a1a1a"/>
+        <Variable name="body.background.image" description="Body Background Image" type="url" value=""/>
+        <Variable name="body.background.image.position" description="Body Background Image Position" type="string" value="center center"/>
+        <Variable name="body.background.image.repeat" description="Body Background Image Repeat" type="string" value="no-repeat"/>
+        <Variable name="body.background.image.attachment" description="Body Background Image Attachment" type="string" value="fixed"/>
+
+        <Variable name="body.font.family" description="Body Font Family" type="font" value="'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"/>
+        <Variable name="body.font.size" description="Body Font Size" type="string" value="16px"/>
+        <Variable name="body.font.weight" description="Body Font Weight" type="string" value="normal"/>
+        <Variable name="body.font.style" description="Body Font Style" type="string" value="normal"/>
+
+        <Variable name="body.text.color" description="Default Text Color" type="color" value="#ffffff"/>
+        <Variable name="header.background.color" description="Header Background Color" type="color" value="#1a1a1a"/>
+        <Variable name="header.text.color" description="Header Text Color" type="color" value="#ffffff"/>
+        <Variable name="accent.color" description="Accent Color" type="color" value="#00d4aa"/>
+        <Variable name="accent.color.hover" description="Accent Color Hover" type="color" value="#00bfa5"/> /* Slightly darker for hover */
+        <Variable name="success.color" description="Success Color" type="color" value="#00d4aa"/>
+        <Variable name="danger.color" description="Danger Color" type="color" value="#ff6b6b"/>
+        <Variable name="warning.color" description="Warning Color" type="color" value="#ffd93d"/>
+        <Variable name="info.color" description="Info Color" type="color" value="#3498db"/>
+
+        /* CSS Custom Properties derived from Blogger Variables */
+        :root {
+            /* Base Colors from Blogger Variables */
+            --theme-body-bg-color: $(body.background.color);
+            --theme-body-text-color: $(body.text.color);
+            --theme-header-bg-color: $(header.background.color);
+            --theme-header-text-color: $(header.text.color);
+            --theme-accent-color: $(accent.color);
+            --theme-accent-color-hover: $(accent.color.hover);
+            --theme-success-color: $(success.color);
+            --theme-danger-color: $(danger.color);
+            --theme-warning-color: $(warning.color);
+            --theme-info-color: $(info.color);
+
+            /* Font properties from Blogger Variables */
+            --theme-body-font-family: $(body.font.family);
+            --theme-body-font-size: $(body.font.size);
+            --theme-body-font-weight: $(body.font.weight);
+            --theme-body-font-style: $(body.font.style);
+
+            /* Static colors or colors derived from the above - these are the ones style.css should use */
+            --primary-color: #1a1a2e; /* This could also be a Blogger variable if needed */
+            --secondary-color: #16213e; /* This could also be a Blogger variable if needed */
+
+            --accent-color: var(--theme-accent-color);
+            --accent-color-hover: var(--theme-accent-color-hover);
+            --success-color: var(--theme-success-color);
+            --danger-color: var(--theme-danger-color);
+            --warning-color: var(--theme-warning-color);
+            --info-color: var(--theme-info-color);
+
+            --text-primary: var(--theme-body-text-color);
+            --header-text-color: var(--theme-header-text-color); /* For header text */
+            --text-secondary: #b8bcc8; /* Could be derived or a new Blogger var */
+            --text-muted: #6c757d;    /* Could be derived or a new Blogger var */
+
+            --bg-primary: var(--theme-body-bg-color);
+            --bg-secondary: #2a2a2a;  /* Could be derived or a new Blogger var */
+            --bg-card: #3a3a3a;       /* Could be derived or a new Blogger var */
+            --bg-hover: #4a4a4a;      /* Could be derived or a new Blogger var */
+
+            --border-color: #333;     /* Could be derived or a new Blogger var */
+
+            /* Light theme overrides (these are fine as they are, not directly from Blogger vars) */
+            --light-bg-primary: #ffffff;
+            --light-bg-secondary: #f8f9fa;
+            --light-bg-card: #ffffff;
+            --light-text-primary: #212529;
+            --light-text-secondary: #6c757d;
+            --light-border-color: #dee2e6;
+        }
+
+        body {
+            font-family: var(--theme-body-font-family);
+            font-size: var(--theme-body-font-size);
+            font-weight: var(--theme-body-font-weight);
+            font-style: var(--theme-body-font-style);
+            background-color: var(--theme-body-bg-color); /* Simple background color */
+            /* For complex backgrounds like images, gradients, etc., use specific properties */
+            /* background-image: $(body.background.image); */
+            /* background-position: $(body.background.image.position); */
+            /* background-repeat: $(body.background.image.repeat); */
+            /* background-attachment: $(body.background.image.attachment); */
+            color: var(--text-primary);
+        }
+
+        .header {
+             background-color: var(--theme-header-bg-color);
+             color: var(--header-text-color); /* Example for header text */
+        }
+
+    ]]></b:skin>
+    <link type='text/css' rel='stylesheet' href='style.css'/>
+    <!-- Other head elements -->
+</head>
+<body>
+    <header>
+        <h1>ProTradeX Trading Platform</h1>
+    </header>
+
+    <main>
+        <div id='tradingChartContainer'></div>
+        <div class='controls'>
+            <button id='btcButton'>BTC/USD</button>
+            <button id='ethButton'>ETH/USD</button>
+            <!-- Add more controls as needed -->
+        </div>
+        <div class='trade-form'>
+            <label for='symbol'>Symbol:</label>
+            <input type='text' id='symbol' name='symbol' value='BTCUSD'/>
+            <label for='type'>Type:</label>
+            <input type='text' id='type' name='type' value='buy'/>
+            <label for='quantity'>Quantity:</label>
+            <input type='number' id='quantity' name='quantity' value='0.1'/>
+            <label for='price'>Price:</label>
+            <input type='number' id='price' name='price' value='29000'/>
+            <button id='executeTradeBtn'>Execute Trade</button>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; 2023 ProTradeX. All rights reserved.</p>
+    </footer>
+
+    <script type='text/javascript'>
+    //<![CDATA[
+    // Removed TradingAPISystem class - now in api.js
+    //]]>
+    </script>
+
+    <script type='text/javascript'>
+    //<![CDATA[
+    // Removed getTradingChartCode function and its content (TradingChart class) - now in chart.js
+
+    class ProTradeXApp {
+        constructor(apiKey) {
+            this.api = new TradingAPISystem(apiKey);
+            this.chart = null;
+            this.currentSymbol = 'BTCUSD';
+            this.currentTimeframe = '1h';
+            console.log('ProTradeXApp initialized.');
+        }
+
+        async initTradingChart(containerId, chartOptions = {}) {
+            try {
+                await this.loadTradingChartScript(); // This function is now in app.js and modified
+                if (window.TradingChart) {
+                    this.chart = new TradingChart(containerId, chartOptions);
+                    console.log('TradingChart instantiated in ProTradeXApp.');
+                    await this.fetchAndDisplayData(this.currentSymbol, this.currentTimeframe);
+                } else {
+                    console.error('TradingChart class not found after loading script.');
+                }
+            } catch (error) {
+                console.error('Error initializing trading chart:', error);
+            }
+        }
+
+        // loadTradingChartScript() is now in app.js and modified to load chart.js externally
+
+        async fetchAndDisplayData(symbol, timeframe) {
+            console.log(`Fetching data for ${symbol}, ${timeframe}`);
+            try {
+                const marketData = await this.api.getMarketData(symbol, timeframe, '2023-01-01', '2023-01-31');
+                if (this.chart && marketData && marketData.data) {
+                    this.chart.setData(marketData.data);
+                    console.log('Market data fetched and displayed on chart.');
+                } else {
+                    console.log('Chart or market data not available for display.');
+                }
+            } catch (error) {
+                console.error('Error fetching or displaying market data:', error);
+            }
+        }
+
+        setupChartControls() {
+            const btcButton = document.getElementById('btcButton');
+            const ethButton = document.getElementById('ethButton');
+
+            if (btcButton) {
+                btcButton.onclick = () => {
+                    this.currentSymbol = 'BTCUSD';
+                    this.fetchAndDisplayData(this.currentSymbol, this.currentTimeframe);
+                    console.log('Symbol changed to BTCUSD');
+                };
+            }
+            if (ethButton) {
+                ethButton.onclick = () => {
+                    this.currentSymbol = 'ETHUSD';
+                    this.fetchAndDisplayData(this.currentSymbol, this.currentTimeframe);
+                    console.log('Symbol changed to ETHUSD');
+                };
+            }
+            const executeBtn = document.getElementById('executeTradeBtn');
+            if(executeBtn) {
+                executeBtn.onclick = () => {
+                    const symbol = document.getElementById('symbol').value;
+                    const type = document.getElementById('type').value;
+                    const quantity = parseFloat(document.getElementById('quantity').value);
+                    const price = parseFloat(document.getElementById('price').value);
+                    this.executeTrade(symbol, type, quantity, price);
+                };
+            }
+            console.log('Chart controls set up.');
+        }
+
+        async executeTrade(symbol, type, quantity, price) {
+            console.log(`Attempting to execute trade: ${type} ${quantity} ${symbol} at ${price}`);
+            try {
+                const result = await this.api.executeTrade(symbol, type, quantity, price);
+                alert(`Trade ${result.success ? 'successful' : 'failed'}: ${result.message || result.orderId}`);
+                console.log('Trade execution result:', result);
+            } catch (error) {
+                console.error('Error executing trade:', error);
+                alert('Trade execution failed.');
+            }
+        }
+    }
+    window.ProTradeXApp = ProTradeXApp;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const app = new ProTradeXApp('YOUR_API_KEY_REPLACE_LATER');
+        app.initTradingChart('tradingChartContainer');
+        app.setupChartControls();
+    });
+    //]]>
+    </script>
+    <script src='api.js' defer=''></script>
+    <script src='chart.js' defer=''></script> <!-- This will be loaded by app.js, but including it here for completeness of the example -->
+    <script src='app.js' defer=''></script>
+</body>
+</html>

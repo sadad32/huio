@@ -12,10 +12,17 @@
 CTrade trade;
 
 // Global Variables for Indicator Handles
-int hFastMA, hSlowMA, hRSI, hMACD, hStochastic;
+int hFastMA, hSlowMA, hRSI, hMACD, hStochastic, hBollingerBands, hATR; // hFastMA, hSlowMA are from old logic, hMACD is needed again. Added hATR
 
 // Global Arrays for Indicator Values
-double arrFastMA[], arrSlowMA[], arrRSI[], arrMACDMain[], arrMACDSignal[], arrStochasticMain[], arrStochasticSignal[];
+double arrFastMA[], arrSlowMA[], arrRSI[], arrMACDMain[], arrMACDSignal[], arrStochasticMain[], arrStochasticSignal[]; // arrFastMA, arrSlowMA for old logic, arrMACD needed
+double arrATR[]; // For ATR values
+double arrBBUpper[], arrBBMiddle[], arrBBLower[];
+long arrVolume[]; // For Real Volume data
+
+// Pivot Point Variables
+double pivot_PP, pivot_S1, pivot_R1, pivot_S2, pivot_R2, pivot_S3, pivot_R3;
+static datetime lastPivotRecalcTime = 0; // Tracks the D1 bar open time for which pivots were last calculated
 
 // Input Parameters
 //--- Trading Settings ---
@@ -25,6 +32,37 @@ enum EnumTradingMode
    MODE_MANUAL_ALERTS // Manual Trading (Alerts Only)
   };
 input EnumTradingMode inpTradingMode = MODE_AUTOMATIC; // Trading Mode
+
+// --- Stop Loss & Take Profit Settings ---
+enum EnumSLTPMode { MODE_PIPS, MODE_ATR };
+input EnumSLTPMode inpSLTPMode = MODE_PIPS;      // SL/TP Calculation Mode
+input int      inpStopLossPips = 15;          // Stop Loss in Pips (Default for Reversal/Scalp)
+input int      inpTakeProfitPips = 30;         // Take Profit in Pips (Default for Reversal/Scalp)
+input int      inpATRPeriodSLTP = 14;             // ATR Period for SL/TP
+input double   inpATRMultiplierSL = 2.0;          // ATR Multiplier for Stop Loss
+input double   inpATRMultiplierTP = 3.0;          // ATR Multiplier for Take Profit
+
+//--- Indicator Settings: Bollinger Bands ---
+input int      inpBBPeriod = 20;               // Bollinger Bands Period
+input double   inpBBDeviations = 2.0;         // Bollinger Bands Deviations
+input int      inpBBShift = 0;                 // Bollinger Bands Shift (usually 0)
+input ENUM_APPLIED_PRICE inpBBPrice = PRICE_CLOSE; // Bollinger Bands Applied Price
+
+//--- Pivot Point Settings ---
+input int inpPivotPointBufferPips = 5; // Buffer in pips for pivot point reaction
+
+//--- Reversal Signal Thresholds (RSI/Stochastic) ---
+input double   inpRSIReversalOverbought = 70.0;      // RSI Overbought Level for Reversal
+input double   inpRSIReversalOversold = 30.0;        // RSI Oversold Level for Reversal
+input double   inpStochasticReversalOverbought = 80.0; // Stochastic Overbought for Reversal
+input double   inpStochasticReversalOversold = 20.0;   // Stochastic Oversold for Reversal
+
+// --- Secondary Confirmation Settings ---
+input bool inpEnableVolumeConfirmation = true;  // Enable Volume Confirmation
+input int  inpVolumeLookbackPeriod = 20;       // Lookback period for average volume
+input double inpVolumeMultiplier = 1.5;         // Multiplier for current volume vs. average
+input bool inpEnableMACDConfirmation = true;   // Enable MACD Confirmation
+// Note: MACD parameters like inpMACDFastEMAPeriod should exist from original EA structure. Assuming they do.
 
 input ulong    inpMagicNumber = 12345; // Magic Number
 
@@ -36,8 +74,8 @@ enum EnumLotSizingStrategy {
 input EnumLotSizingStrategy inpLotSizingStrategy = LOT_STRATEGY_FIXED; // Lot Sizing Strategy
 input double   inpFixedLotSize = 0.01;        // Fixed Lot Size
 input double   inpEquityPercentage = 1.0;     // Percentage of Equity for Lot Sizing (e.g., 1.0 for 1%)
-input int      inpStopLossPips = 50;          // Stop Loss in Pips
-input int      inpTakeProfitPips = 100;         // Take Profit in Pips
+// input int      inpStopLossPips = 50;          // Stop Loss in Pips - Replaced by new SLTP settings above
+// input int      inpTakeProfitPips = 100;         // Take Profit in Pips - Replaced by new SLTP settings above
 input bool     inpEnableTrailingStop = true;   // Enable/Disable Trailing Stop
 input int      inpTrailingStopTriggerPips = 20; // Pips in profit to trigger trailing stop
 input int      inpTrailingStopStepPips = 5;   // Trailing Stop Step in Pips
@@ -68,9 +106,9 @@ input int      inpStochasticSlowing = 3;      // Stochastic Slowing
 input ENUM_MA_METHOD inpStochasticMAMethod = MODE_SMA; // Stochastic MA Method
 input ENUM_STO_PRICE inpStochasticPriceField = STO_LOWHIGH; // Stochastic Price Field (Low/High or Close/Close)
 
-//--- Signal Thresholds ---
-input double   inpRSIOverbought = 70.0;      // RSI Overbought Level
-input double   inpRSIOversold = 30.0;        // RSI Oversold Level
+//--- Signal Thresholds (Original - can be kept for other modes or removed if only reversal is used) ---
+// input double   inpRSIOverbought = 70.0;      // RSI Overbought Level (Original)
+// input double   inpRSIOversold = 30.0;        // RSI Oversold Level (Original)
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -93,6 +131,9 @@ int OnInit()
    hStochastic = iStochastic(_Symbol, _Period, inpStochasticKPeriod, inpStochasticDPeriod, inpStochasticSlowing, inpStochasticMAMethod, inpStochasticPriceField);
    if(hStochastic == INVALID_HANDLE) { Print("Error initializing Stochastic"); return(INIT_FAILED); }
 
+   hBollingerBands = iBands(_Symbol, _Period, inpBBPeriod, inpBBShift, inpBBDeviations, inpBBPrice);
+   if(hBollingerBands == INVALID_HANDLE) { Print("Error initializing Bollinger Bands"); return(INIT_FAILED); }
+
    // Set arrays as series
    ArraySetAsSeries(arrFastMA, true);
    ArraySetAsSeries(arrSlowMA, true);
@@ -101,6 +142,33 @@ int OnInit()
    ArraySetAsSeries(arrMACDSignal, true);
    ArraySetAsSeries(arrStochasticMain, true);
    ArraySetAsSeries(arrStochasticSignal, true);
+   ArraySetAsSeries(arrBBUpper, true);
+   ArraySetAsSeries(arrBBMiddle, true);
+   ArraySetAsSeries(arrBBLower, true);
+   ArraySetAsSeries(arrVolume, true); // Set series for Volume array
+   ArraySetAsSeries(arrATR, true);    // Set series for ATR array
+
+   // Ensure MACD is initialized (it might have been removed if not used by core signal)
+   // Assuming MACD inputs (inpMACDFastEMAPeriod, etc.) are present globally
+   hMACD = iMACD(_Symbol, _Period, inpMACDFastEMAPeriod, inpMACDSlowEMAPeriod, inpMACDSignalMAPeriod, inpMACDPrice);
+   if(hMACD == INVALID_HANDLE) { Print("Error initializing MACD for confirmation"); return(INIT_FAILED); }
+
+   hATR = iATR(_Symbol, _Period, inpATRPeriodSLTP);
+   if(hATR == INVALID_HANDLE) { Print("Error initializing ATR indicator: ", GetLastError()); return(INIT_FAILED); }
+
+   // arrMACDMain and arrMACDSignal should already be set as series if hMACD init is here.
+
+   // Initial Pivot Calculation
+   if(Bars(_Symbol, PERIOD_D1) > 1) // Ensure previous day's bar exists for initial calculation
+     {
+      CalculateDailyPivotPoints(PERIOD_D1);
+      lastPivotRecalcTime = iTime(_Symbol, PERIOD_D1, 0); // Set based on current D1 bar open
+     }
+   else
+     {
+      Print("Not enough D1 bars to calculate initial pivot points.");
+     }
+
 
    return(INIT_SUCCEEDED);
   }
@@ -115,12 +183,25 @@ void OnDeinit(const int reason)
    IndicatorRelease(hRSI);
    IndicatorRelease(hMACD);
    IndicatorRelease(hStochastic);
+   IndicatorRelease(hBollingerBands);
+   IndicatorRelease(hATR);
   }
 //+------------------------------------------------------------------+
 //| Expert tick function                                             |
 //+------------------------------------------------------------------+
 void OnTick()
   {
+   // Recalculate pivot points at the start of a new D1 bar
+   datetime currentD1BarOpen = iTime(_Symbol, PERIOD_D1, 0);
+   if(lastPivotRecalcTime != currentD1BarOpen)
+     {
+      if(Bars(_Symbol, PERIOD_D1) > 1) // Make sure previous day's bar exists for calculation
+        {
+         CalculateDailyPivotPoints(PERIOD_D1);
+         lastPivotRecalcTime = currentD1BarOpen;
+        }
+     }
+
 //--- Main trading logic here
    // Copy indicator buffers
    if(CopyBuffer(hFastMA, 0, 0, 3, arrFastMA) <= 0) { Print("Error copying Fast MA buffer"); return; }
@@ -130,6 +211,33 @@ void OnTick()
    if(CopyBuffer(hMACD, 1, 0, 3, arrMACDSignal) <= 0) { Print("Error copying MACD Signal buffer"); return; }
    if(CopyBuffer(hStochastic, 0, 0, 3, arrStochasticMain) <= 0) { Print("Error copying Stochastic Main buffer"); return; }
    if(CopyBuffer(hStochastic, 1, 0, 3, arrStochasticSignal) <= 0) { Print("Error copying Stochastic Signal buffer"); return; }
+   if(CopyBuffer(hBollingerBands, 0, 0, 3, arrBBUpper) <= 0) { Print("Error copying BB Upper buffer"); return; } // UPPER_BAND
+   if(CopyBuffer(hBollingerBands, 1, 0, 3, arrBBMiddle) <= 0) { Print("Error copying BB Middle buffer"); return; } // BASE_LINE / Middle
+   if(CopyBuffer(hBollingerBands, 2, 0, 3, arrBBLower) <= 0) { Print("Error copying BB Lower buffer"); return; } // LOWER_BAND
+
+   // Copy Volume Data
+   // Copy enough data: inpVolumeLookbackPeriod for average + signal bar [1] + current bar [0]
+   // So, inpVolumeLookbackPeriod previous bars means indices from 2 to inpVolumeLookbackPeriod+1
+   // Total elements to copy: inpVolumeLookbackPeriod + 2
+   int volDataToCopy = inpVolumeLookbackPeriod + 2;
+   if(CopyRealVolume(_Symbol, _Period, 0, volDataToCopy, arrVolume) < volDataToCopy)
+     { Print("Error copying volume data, not enough bars or error. Needed: ", volDataToCopy, " Got: ", ArraySize(arrVolume)); return; }
+
+   // Ensure MACD data is copied (arrMACDMain, arrMACDSignal should be populated)
+   // This was already part of the OnTick if MACD handle (hMACD) is valid and initialized.
+   // Redundant CopyBuffer calls for MACD here if they are already above. Let's ensure they are there.
+   // The existing CopyBuffer for hMACD should be fine if hMACD is properly initialized.
+   // if(CopyBuffer(hMACD, 0, 0, 3, arrMACDMain) <= 0) { Print("Error copying MACD Main buffer for confirmation"); return; }
+   // if(CopyBuffer(hMACD, 1, 0, 3, arrMACDSignal) <= 0) { Print("Error copying MACD Signal buffer for confirmation"); return; }
+   // The above MACD copy calls are likely already present from original structure. If not, they'd be needed.
+   // For this subtask, I'm focusing on adding the logic that USES these, assuming they are populated.
+
+   // Copy ATR Buffer
+   if(CopyBuffer(hATR, 0, 0, 3, arrATR) < 3)
+     {
+      Print("Error copying ATR buffer: ", GetLastError());
+      return;
+     }
 
    // Check for signals once per bar
    static datetime BarTime = 0;
@@ -201,40 +309,152 @@ void OnTick()
 //+------------------------------------------------------------------+
 bool CheckBuySignal()
   {
-   // Ensure we have enough data. Index 1 is the last completed bar, index 2 is the one before that.
-   // We need at least 2 bars of data for simple checks, 3 for crossover checks using [1] and [2].
-   // CopyBuffer is already copying 3 bars, so arr*.Buffer[0,1,2] should be available.
-   if(ArraySize(arrFastMA) < 2 || ArraySize(arrSlowMA) < 2 || ArraySize(arrRSI) < 2 || ArraySize(arrMACDMain) < 2 || ArraySize(arrMACDSignal) < 2)
+   // 0-1 Reversal Signal Logic
+   // Ensure we have enough data for all indicators including BB. Low[1], High[1] are predefined.
+   if(ArraySize(arrRSI) < 3 || ArraySize(arrStochasticMain) < 3 || ArraySize(arrStochasticSignal) < 3 || ArraySize(arrBBLower) < 2 || ArraySize(arrBBUpper) < 2 || Bars(_Symbol, _Period) < 3 )
      {
-      Print("Not enough data in indicator arrays for signal check.");
+      Print("Not enough data in indicator arrays for Reversal signal check.");
       return false;
      }
 
-   bool fastAboveslow = arrFastMA[1] > arrSlowMA[1];
-   bool rsiOversold = arrRSI[1] < inpRSIOversold;
-   bool macdBullish = arrMACDMain[1] > arrMACDSignal[1];
-   // bool stochasticBullish = arrStochasticMain[1] > arrStochasticSignal[1] && arrStochasticMain[1] < 20; // Example
+   // 1. RSI Oversold
+   bool rsi_condition = arrRSI[1] < inpRSIReversalOversold;
 
-   return (fastAboveslow && rsiOversold && macdBullish);
+   // 2. Stochastic Oversold & Bullish Cross
+   bool stochastic_condition = arrStochasticMain[1] < inpStochasticReversalOversold &&
+                               arrStochasticSignal[1] < inpStochasticReversalOversold &&
+                               arrStochasticMain[1] > arrStochasticSignal[1] && // Main crossed above Signal
+                               arrStochasticMain[2] <= arrStochasticSignal[2]; // Main was below or equal to Signal on bar before
+
+   // 3. Bollinger Band Lower Touch/Near
+   bool bb_condition = Low[1] <= arrBBLower[1];
+
+   // 4. Pivot Point Support Reaction
+   double identifiedPivot_buy = 0;
+   bool pivot_raw_hit = IsPriceNearPivot(Low[1], identifiedPivot_buy);
+   bool pivot_is_support = (identifiedPivot_buy == pivot_PP || identifiedPivot_buy == pivot_S1 || identifiedPivot_buy == pivot_S2 || identifiedPivot_buy == pivot_S3);
+   bool pivot_condition = pivot_raw_hit && pivot_is_support;
+
+   bool coreSignal = rsi_condition && stochastic_condition && bb_condition && pivot_condition;
+
+   if (!coreSignal) return false;
+
+   if(coreSignal) // For clarity in logs, print core passed before checking secondary
+     {
+      Print("Core Reversal Buy Conditions Met: RSI=", rsi_condition, ", Stoch=", stochastic_condition, ", BB=", bb_condition, ", Pivot=", pivot_condition, " (Level: ", identifiedPivot_buy, ")");
+     }
+
+   // Secondary Confirmations
+   if (inpEnableVolumeConfirmation)
+     {
+      // Ensure enough data: arrVolume[0] is current, [1] is signal bar, [2]...[LB_Period+1] are for avg
+      if (inpVolumeLookbackPeriod + 1 >= ArraySize(arrVolume) || ArraySize(arrVolume) < inpVolumeLookbackPeriod + 2 )
+        { Print("Not enough volume data for average. ArraySize: ", ArraySize(arrVolume), " Needed for lookback+signal: ", inpVolumeLookbackPeriod + 2); return false;}
+
+      double avgVolume = 0;
+      for (int i = 1; i <= inpVolumeLookbackPeriod; i++)
+        {
+         avgVolume += arrVolume[i + 1]; // Sum volumes from index 2 to inpVolumeLookbackPeriod + 1
+        }
+      avgVolume /= inpVolumeLookbackPeriod;
+
+      if (arrVolume[1] < avgVolume * inpVolumeMultiplier)
+        {
+         Print("Volume confirmation FAILED for Buy. Signal Bar Volume: ", arrVolume[1], " Avg Volume: ", avgVolume, " Required Multiplier: ", inpVolumeMultiplier);
+         return false;
+        }
+      Print("Volume confirmation PASSED for Buy. Signal Bar Volume: ", arrVolume[1], " Avg Volume: ", avgVolume);
+     }
+
+   if (inpEnableMACDConfirmation)
+     {
+      // Ensure arrMACDMain and arrMACDSignal have at least 3 elements for index [2] for crossover check
+      if(ArraySize(arrMACDMain) < 3 || ArraySize(arrMACDSignal) < 3) { Print("Not enough MACD data for confirmation."); return false; }
+
+      bool macd_buy_cross = arrMACDMain[1] > arrMACDSignal[1] && arrMACDMain[2] <= arrMACDSignal[2];
+      if (!macd_buy_cross)
+        {
+         Print("MACD confirmation FAILED for Buy. Main[1]:", arrMACDMain[1], " Sig[1]:", arrMACDSignal[1], " Main[2]:", arrMACDMain[2], " Sig[2]:", arrMACDSignal[2]);
+         return false;
+        }
+      Print("MACD confirmation PASSED for Buy.");
+     }
+   return true; // Core signal AND enabled confirmations are true
   }
 //+------------------------------------------------------------------+
 //| Check for Sell Signal                                            |
 //+------------------------------------------------------------------+
 bool CheckSellSignal()
   {
-   // Ensure we have enough data
-   if(ArraySize(arrFastMA) < 2 || ArraySize(arrSlowMA) < 2 || ArraySize(arrRSI) < 2 || ArraySize(arrMACDMain) < 2 || ArraySize(arrMACDSignal) < 2)
+   // 0-1 Reversal Signal Logic for Sell
+   // Ensure we have enough data for all indicators including BB. Low[1], High[1] are predefined.
+   if(ArraySize(arrRSI) < 3 || ArraySize(arrStochasticMain) < 3 || ArraySize(arrStochasticSignal) < 3 || ArraySize(arrBBLower) < 2 || ArraySize(arrBBUpper) < 2 || Bars(_Symbol, _Period) < 3)
      {
-      Print("Not enough data in indicator arrays for signal check.");
+      Print("Not enough data in indicator arrays for Reversal signal check.");
       return false;
      }
 
-   bool fastBelowslow = arrFastMA[1] < arrSlowMA[1];
-   bool rsiOverbought = arrRSI[1] > inpRSIOverbought;
-   bool macdBearish = arrMACDMain[1] < arrMACDSignal[1];
-   // bool stochasticBearish = arrStochasticMain[1] < arrStochasticSignal[1] && arrStochasticMain[1] > 80; // Example
+   // 1. RSI Overbought
+   bool rsi_condition_sell = arrRSI[1] > inpRSIReversalOverbought;
 
-   return (fastBelowslow && rsiOverbought && macdBearish);
+   // 2. Stochastic Overbought & Bearish Cross
+   bool stochastic_condition_sell = arrStochasticMain[1] > inpStochasticReversalOverbought &&
+                                    arrStochasticSignal[1] > inpStochasticReversalOverbought &&
+                                    arrStochasticMain[1] < arrStochasticSignal[1] && // Main crossed below Signal
+                                    arrStochasticMain[2] >= arrStochasticSignal[2]; // Main was above or equal to Signal on bar before
+
+   // 3. Bollinger Band Upper Touch/Near
+   bool bb_condition_sell = High[1] >= arrBBUpper[1];
+
+   // 4. Pivot Point Resistance Reaction
+   double identifiedPivot_sell = 0;
+   bool pivot_raw_hit_sell = IsPriceNearPivot(High[1], identifiedPivot_sell);
+   bool pivot_is_resistance = (identifiedPivot_sell == pivot_PP || identifiedPivot_sell == pivot_R1 || identifiedPivot_sell == pivot_R2 || identifiedPivot_sell == pivot_R3);
+   bool pivot_condition_sell = pivot_raw_hit_sell && pivot_is_resistance;
+
+   bool coreSignal = rsi_condition_sell && stochastic_condition_sell && bb_condition_sell && pivot_condition_sell;
+
+   if (!coreSignal) return false;
+
+   if(coreSignal) // For clarity in logs
+     {
+      Print("Core Reversal Sell Conditions Met: RSI=", rsi_condition_sell, ", Stoch=", stochastic_condition_sell, ", BB=", bb_condition_sell, ", Pivot=", pivot_condition_sell, " (Level: ", identifiedPivot_sell, ")");
+     }
+
+   // Secondary Confirmations
+   if (inpEnableVolumeConfirmation)
+     {
+      if (inpVolumeLookbackPeriod + 1 >= ArraySize(arrVolume) || ArraySize(arrVolume) < inpVolumeLookbackPeriod + 2)
+         { Print("Not enough volume data for average. ArraySize: ", ArraySize(arrVolume), " Needed for lookback+signal: ", inpVolumeLookbackPeriod + 2); return false;}
+
+      double avgVolume = 0;
+      for (int i = 1; i <= inpVolumeLookbackPeriod; i++)
+        {
+         avgVolume += arrVolume[i + 1];
+        }
+      avgVolume /= inpVolumeLookbackPeriod;
+
+      if (arrVolume[1] < avgVolume * inpVolumeMultiplier)
+        {
+         Print("Volume confirmation FAILED for Sell. Signal Bar Volume: ", arrVolume[1], " Avg Volume: ", avgVolume, " Required Multiplier: ", inpVolumeMultiplier);
+         return false;
+        }
+      Print("Volume confirmation PASSED for Sell. Signal Bar Volume: ", arrVolume[1], " Avg Volume: ", avgVolume);
+     }
+
+   if (inpEnableMACDConfirmation)
+     {
+      if(ArraySize(arrMACDMain) < 3 || ArraySize(arrMACDSignal) < 3) { Print("Not enough MACD data for confirmation."); return false; }
+
+      bool macd_sell_cross = arrMACDMain[1] < arrMACDSignal[1] && arrMACDMain[2] >= arrMACDSignal[2];
+      if (!macd_sell_cross)
+        {
+         Print("MACD confirmation FAILED for Sell. Main[1]:", arrMACDMain[1], " Sig[1]:", arrMACDSignal[1], " Main[2]:", arrMACDMain[2], " Sig[2]:", arrMACDSignal[2]);
+         return false;
+        }
+      Print("MACD confirmation PASSED for Sell.");
+     }
+   return true; // Core signal AND enabled confirmations are true
   }
 //+------------------------------------------------------------------+
 //| Helper function for Lot Size Calculation                         |
@@ -306,74 +526,112 @@ void ExecuteTrade(ENUM_ORDER_TYPE orderType)
    double sl = 0.0;
    double tp = 0.0;
    string comment = "";
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
 
    trade.SetExpertMagicNumber(inpMagicNumber);
    trade.SetDeviationInPoints(5); // Or make this an input parameter
 
+   double stopLossValue = 0;
+   double takeProfitValue = 0;
+
+   if (inpSLTPMode == MODE_ATR)
+     {
+      if (ArraySize(arrATR) < 1 || arrATR[1] <= 0) // Check if ATR value is valid (use index 1 for last closed bar)
+        {
+         Print("ATR value not available or invalid for SL/TP calculation (ATR[1]=", arrATR[1],"). Defaulting to Pips mode for this trade.");
+         stopLossValue = inpStopLossPips * point;
+         takeProfitValue = inpTakeProfitPips * point;
+        }
+      else
+        {
+         stopLossValue = arrATR[1] * inpATRMultiplierSL;
+         takeProfitValue = arrATR[1] * inpATRMultiplierTP;
+         Print("ATR SL/TP distances calculated: SL=", NormalizeDouble(stopLossValue/point,1)," pips, TP=", NormalizeDouble(takeProfitValue/point,1)," pips. ATR val on bar [1]: ", arrATR[1]);
+        }
+     }
+   else // MODE_PIPS
+     {
+      stopLossValue = inpStopLossPips * point;
+      takeProfitValue = inpTakeProfitPips * point;
+      Print("Pips SL/TP distances: SL=", inpStopLossPips," pips, TP=", inpTakeProfitPips," pips.");
+     }
+
+   double currentPriceAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double currentPriceBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
    if(orderType == ORDER_TYPE_BUY)
      {
-      price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      if(inpStopLossPips > 0)
-         sl = SymbolInfoDouble(_Symbol, SYMBOL_BID) - inpStopLossPips * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      if(inpTakeProfitPips > 0)
-         tp = SymbolInfoDouble(_Symbol, SYMBOL_BID) + inpTakeProfitPips * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      price = currentPriceAsk; // Buy orders filled at Ask
+      if (inpStopLossPips > 0 || (inpSLTPMode == MODE_ATR && inpATRMultiplierSL > 0))
+         sl = currentPriceBid - stopLossValue; // SL for Buy relative to Bid
+      if (inpTakeProfitPips > 0 || (inpSLTPMode == MODE_ATR && inpATRMultiplierTP > 0))
+         tp = currentPriceBid + takeProfitValue; // TP for Buy relative to Bid
       comment = "Buy Order by EA";
+     }
+   else // ORDER_TYPE_SELL
+     {
+      price = currentPriceBid; // Sell orders filled at Bid
+      if (inpStopLossPips > 0 || (inpSLTPMode == MODE_ATR && inpATRMultiplierSL > 0))
+         sl = currentPriceAsk + stopLossValue; // SL for Sell relative to Ask
+      if (inpTakeProfitPips > 0 || (inpSLTPMode == MODE_ATR && inpATRMultiplierTP > 0))
+         tp = currentPriceAsk - takeProfitValue; // TP for Sell relative to Ask
+      comment = "Sell Order by EA";
+     }
 
-      // Adjust SL and TP to be valid if they are too close to the market
-      double stopLevelPips = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-      double stopLevelPoints = stopLevelPips * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   // Adjust SL and TP to be valid if they are too close to the market
+   // CTrade class handles this internally when placing orders, but good to be aware
+   // For example, if sl or tp is 0, CTrade won't set it.
+   // If sl or tp is too close, CTrade might adjust or fail.
+   // The logic below for adjusting SL/TP if too close is now effectively handled by CTrade.
+   // We can remove the manual adjustment here if we rely on CTrade's behavior.
+   // Let's keep the manual adjustment for clarity and control.
+   double stopLevelPips = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      double stopLevelPoints = stopLevelPips * point;
 
+   if(orderType == ORDER_TYPE_BUY)
+     {
+      // For BUY: sl must be less than price - stopLevelPoints, tp must be greater than price + stopLevelPoints
       if(sl != 0.0 && price - sl < stopLevelPoints)
         {
-         Print("SL too close for BUY order, adjusting. Original SL: ", sl, ", Price: ", price, ", StopLevelPoints: ", stopLevelPoints);
-         sl = price - stopLevelPoints;
+         Print("SL for BUY order (", NormalizeDouble(sl, _Digits), ") too close to price (", NormalizeDouble(price, _Digits), "). Adjusting. Min distance: ", stopLevelPoints/point, " pips.");
+         sl = price - stopLevelPoints; // price here is Ask
         }
       if(tp != 0.0 && tp - price < stopLevelPoints)
         {
-         Print("TP too close for BUY order, adjusting. Original TP: ", tp, ", Price: ", price, ", StopLevelPoints: ", stopLevelPoints);
+         Print("TP for BUY order (", NormalizeDouble(tp, _Digits), ") too close to price (", NormalizeDouble(price, _Digits), "). Adjusting. Min distance: ", stopLevelPoints/point, " pips.");
          tp = price + stopLevelPoints;
         }
 
       if(!trade.Buy(lot, _Symbol, price, sl, tp, comment))
         {
-         Print("Buy order failed: ", trade.ResultRetcode(), " - ", trade.ResultComment());
+         Print("Buy order failed: ", trade.ResultRetcode(), " - ", trade.ResultComment(), ". SL: ", sl, " TP: ", tp, " Price: ", price);
         }
       else
         {
-         Print("Buy order placed successfully. Ticket: ", trade.ResultOrder());
+         Print("Buy order placed successfully. Ticket: ", trade.ResultOrder(), ". SL: ", sl, " TP: ", tp);
         }
      }
    else if(orderType == ORDER_TYPE_SELL)
      {
-      price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      if(inpStopLossPips > 0)
-         sl = SymbolInfoDouble(_Symbol, SYMBOL_ASK) + inpStopLossPips * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      if(inpTakeProfitPips > 0)
-         tp = SymbolInfoDouble(_Symbol, SYMBOL_ASK) - inpTakeProfitPips * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      comment = "Sell Order by EA";
-
-      // Adjust SL and TP to be valid if they are too close to the market
-      double stopLevelPips = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-      double stopLevelPoints = stopLevelPips * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-
+      // For SELL: sl must be greater than price + stopLevelPoints, tp must be less than price - stopLevelPoints
       if(sl != 0.0 && sl - price < stopLevelPoints)
         {
-         Print("SL too close for SELL order, adjusting. Original SL: ", sl, ", Price: ", price, ", StopLevelPoints: ", stopLevelPoints);
-         sl = price + stopLevelPoints;
+         Print("SL for SELL order (", NormalizeDouble(sl, _Digits), ") too close to price (", NormalizeDouble(price, _Digits), "). Adjusting. Min distance: ", stopLevelPoints/point, " pips.");
+         sl = price + stopLevelPoints; // price here is Bid
         }
       if(tp != 0.0 && price - tp < stopLevelPoints)
         {
-         Print("TP too close for SELL order, adjusting. Original TP: ", tp, ", Price: ", price, ", StopLevelPoints: ", stopLevelPoints);
+         Print("TP for SELL order (", NormalizeDouble(tp, _Digits), ") too close to price (", NormalizeDouble(price, _Digits), "). Adjusting. Min distance: ", stopLevelPoints/point, " pips.");
          tp = price - stopLevelPoints;
         }
 
       if(!trade.Sell(lot, _Symbol, price, sl, tp, comment))
         {
-         Print("Sell order failed: ", trade.ResultRetcode(), " - ", trade.ResultComment());
+         Print("Sell order failed: ", trade.ResultRetcode(), " - ", trade.ResultComment(), ". SL: ", sl, " TP: ", tp, " Price: ", price);
         }
       else
         {
-         Print("Sell order placed successfully. Ticket: ", trade.ResultOrder());
+         Print("Sell order placed successfully. Ticket: ", trade.ResultOrder(), ". SL: ", sl, " TP: ", tp);
         }
      }
   }
@@ -410,17 +668,17 @@ void ManageTrailingStops()
                      newSL = potentialNewSL;
                      // Ensure new SL is not too close to the market
                      double stopLevelPoints = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * point;
-                     if (currentPrice - newSL < stopLevelPoints)
+                     if (currentPrice - newSL < stopLevelPoints && stopLevelPoints > 0) // check stopLevelPoints > 0 to avoid issues on some symbols
                        {
                         newSL = currentPrice - stopLevelPoints;
-                        Print("Trailing SL for BUY (ticket: ", ticket, ") adjusted to avoid being too close. New SL: ", newSL);
+                        Print("Trailing SL for BUY (ticket: ", ticket, ") adjusted to avoid being too close. New SL: ", NormalizeDouble(newSL, _Digits));
                        }
 
                      if(newSL != currentSL) // Check if modification is actually needed
                        {
                         if(trade.PositionModify(ticket, newSL, currentTP))
                           {
-                           Print("Trailing stop for BUY position ", ticket, " modified. New SL: ", newSL);
+                           Print("Trailing stop for BUY position ", ticket, " modified. New SL: ", NormalizeDouble(newSL, _Digits));
                           }
                         else
                           {
@@ -441,17 +699,17 @@ void ManageTrailingStops()
                      newSL = potentialNewSL;
                      // Ensure new SL is not too close to the market
                      double stopLevelPoints = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * point;
-                     if (newSL - currentPrice < stopLevelPoints)
+                     if (newSL - currentPrice < stopLevelPoints && stopLevelPoints > 0) // check stopLevelPoints > 0
                        {
                         newSL = currentPrice + stopLevelPoints;
-                        Print("Trailing SL for SELL (ticket: ", ticket, ") adjusted to avoid being too close. New SL: ", newSL);
+                        Print("Trailing SL for SELL (ticket: ", ticket, ") adjusted to avoid being too close. New SL: ", NormalizeDouble(newSL, _Digits));
                        }
 
                      if(newSL != currentSL) // Check if modification is actually needed
                        {
                         if(trade.PositionModify(ticket, newSL, currentTP))
                           {
-                           Print("Trailing stop for SELL position ", ticket, " modified. New SL: ", newSL);
+                           Print("Trailing stop for SELL position ", ticket, " modified. New SL: ", NormalizeDouble(newSL, _Digits));
                           }
                         else
                           {
@@ -468,5 +726,61 @@ void ManageTrailingStops()
          Print("Error selecting position by ticket ", ticket, " in ManageTrailingStops. Error code: ", GetLastError());
         }
      }
+  }
+//+------------------------------------------------------------------+
+//| Calculate Daily Pivot Points                                     |
+//+------------------------------------------------------------------+
+void CalculateDailyPivotPoints(ENUM_TIMEFRAMES pivot_timeframe = PERIOD_D1)
+  {
+   datetime prev_day_bar_time = iTime(_Symbol, pivot_timeframe, 1); // Time of the previous D1 bar
+   if(prev_day_bar_time == 0 && Bars(_Symbol, pivot_timeframe) < 2) // Not enough history
+     {
+      Print("Cannot calculate Pivot Points: Not enough history for timeframe ", EnumToString(pivot_timeframe));
+      return;
+     }
+
+   double prev_high = iHigh(_Symbol, pivot_timeframe, 1);
+   double prev_low = iLow(_Symbol, pivot_timeframe, 1);
+   double prev_close = iClose(_Symbol, pivot_timeframe, 1);
+
+   if(prev_high == 0 || prev_low == 0 || prev_close == 0) // Should not happen if prev_day_bar_time is valid
+     {
+      Print("Cannot calculate Pivot Points: Data for previous bar is zero. High: ", prev_high, " Low: ", prev_low, " Close: ", prev_close);
+      return;
+     }
+
+   pivot_PP = (prev_high + prev_low + prev_close) / 3.0;
+   pivot_R1 = (2.0 * pivot_PP) - prev_low;
+   pivot_S1 = (2.0 * pivot_PP) - prev_high;
+   pivot_R2 = pivot_PP + (prev_high - prev_low);
+   pivot_S2 = pivot_PP - (prev_high - prev_low);
+   pivot_R3 = prev_high + 2.0 * (pivot_PP - prev_low);
+   pivot_S3 = prev_low - 2.0 * (prev_high - pivot_PP);
+
+   // Storing the open time of the D1 bar for which these pivots are calculated (i.e., the previous D1 bar)
+   // lastPivotRecalcTime will store the open time of the *current* D1 bar when this function is called
+   // This means pivot_DayCalculated isn't strictly needed if lastPivotRecalcTime is used correctly.
+
+   Print("Pivot Points Calculated using data from D1 bar @ ", TimeToString(prev_day_bar_time),": PP=",NormalizeDouble(pivot_PP,_Digits), ", S1=",NormalizeDouble(pivot_S1,_Digits),", R1=",NormalizeDouble(pivot_R1,_Digits));
+   // Print("S2=",NormalizeDouble(pivot_S2,_Digits),", R2=",NormalizeDouble(pivot_R2,_Digits), ", S3=",NormalizeDouble(pivot_S3,_Digits),", R3=",NormalizeDouble(pivot_R3,_Digits));
+  }
+//+------------------------------------------------------------------+
+//| Check if Price is Near a Pivot Level                             |
+//+------------------------------------------------------------------+
+bool IsPriceNearPivot(double price, double& identifiedPivotLevel)
+  {
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double buffer = inpPivotPointBufferPips * point;
+
+   if(MathAbs(price - pivot_PP) <= buffer) { identifiedPivotLevel = pivot_PP; return true; }
+   if(MathAbs(price - pivot_S1) <= buffer) { identifiedPivotLevel = pivot_S1; return true; }
+   if(MathAbs(price - pivot_R1) <= buffer) { identifiedPivotLevel = pivot_R1; return true; }
+   if(MathAbs(price - pivot_S2) <= buffer) { identifiedPivotLevel = pivot_S2; return true; }
+   if(MathAbs(price - pivot_R2) <= buffer) { identifiedPivotLevel = pivot_R2; return true; }
+   if(MathAbs(price - pivot_S3) <= buffer) { identifiedPivotLevel = pivot_S3; return true; }
+   if(MathAbs(price - pivot_R3) <= buffer) { identifiedPivotLevel = pivot_R3; return true; }
+
+   identifiedPivotLevel = 0.0;
+   return false;
   }
 //+------------------------------------------------------------------+

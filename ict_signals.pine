@@ -1,0 +1,320 @@
+//@version=5
+indicator("ICT Signals by Jules", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// 1. Inputs
+var string GROUP_INPUTS = "Inputs"
+var string GROUP_KILLZONE = "Killzone Settings (Mecca Time)"
+
+// General Inputs
+lookbackSweep = input.int(5, title="Sweep Lookback", group=GROUP_INPUTS, tooltip="Number of candles to look back for liquidity sweep.")
+riskPipsGold = input.float(20.0, title="Max Risk Pips (Gold XAUUSD)", group=GROUP_INPUTS, tooltip="Maximum stop loss in pips for Gold (XAUUSD). This is used if actual SL is larger.")
+atrLengthSL = input.int(14, title="ATR Length for SL", group=GROUP_INPUTS, tooltip="ATR period for dynamic Stop Loss calculation if not Gold.")
+atrMultiplierSL = input.float(1.5, title="ATR Multiplier for SL", group=GROUP_INPUTS, tooltip="ATR multiplier for dynamic SL.")
+
+// Killzone Inputs (Mecca Timezone, UTC+3)
+kz_london_open_hour = input.int(10, title="London Open (Hour)", group=GROUP_KILLZONE, minval=0, maxval=23) // 10:00 Mecca = 07:00 UTC
+kz_london_open_minute = input.int(0, title="London Open (Minute)", group=GROUP_KILLZONE, minval=0, maxval=59)
+kz_london_close_hour = input.int(13, title="London Close (Hour)", group=GROUP_KILLZONE, minval=0, maxval=23) // 13:00 Mecca = 10:00 UTC
+kz_london_close_minute = input.int(0, title="London Close (Minute)", group=GROUP_KILLZONE, minval=0, maxval=59)
+
+kz_ny_open_hour = input.int(15, title="New York Open (Hour)", group=GROUP_KILLZONE, minval=0, maxval=23) // 15:00 Mecca = 12:00 UTC
+kz_ny_open_minute = input.int(0, title="New York Open (Minute)", group=GROUP_KILLZONE, minval=0, maxval=59)
+kz_ny_close_hour = input.int(20, title="New York Close (Hour)", group=GROUP_KILLZONE, minval=0, maxval=23) // 20:00 Mecca = 17:00 UTC
+kz_ny_close_minute = input.int(0, title="New York Close (Minute)", group=GROUP_KILLZONE, minval=0, maxval=59)
+
+enableKillzone = input.bool(true, title="Enable Killzone Filter", group=GROUP_KILLZONE)
+
+// Helper function to check if current time is within a killzone (Mecca Time, UTC+3)
+isKillzone() =>
+    meccaTime = time + 3 * 60 * 60 * 1000 // Add 3 hours for UTC+3
+    currentHour = hour(meccaTime, "Asia/Riyadh")
+    currentMinute = minute(meccaTime, "Asia/Riyadh")
+
+    isLondonSession = (currentHour > kz_london_open_hour or (currentHour == kz_london_open_hour and currentMinute >= kz_london_open_minute)) and
+         (currentHour < kz_london_close_hour or (currentHour == kz_london_close_hour and currentMinute <= kz_london_close_minute))
+
+    isNYSession = (currentHour > kz_ny_open_hour or (currentHour == kz_ny_open_hour and currentMinute >= kz_ny_open_minute)) and
+         (currentHour < kz_ny_close_hour or (currentHour == kz_ny_close_hour and currentMinute <= kz_ny_close_minute))
+
+    enableKillzone ? (isLondonSession or isNYSession) : true
+
+// --- Trade State Machine ---
+var string tradeState = "IDLE" // IDLE, ACTIVE, HALF, CLOSED
+var string tradeId = na
+var string tradeSymbol = syminfo.ticker
+var string tradeSide = na // "BUY" or "SELL"
+var float tradeEntryPrice = na
+var float tradeSL = na
+var float tradeTP1 = na
+var float tradeTP2 = na
+var bool tp1Hit = false
+var int tradeStartTime = na
+
+// Function to generate a unique enough trade ID
+newTradeId() =>
+    str.tostring(year) + str.tostring(month) + str.tostring(dayofmonth) +
+    str.tostring(hour) + str.tostring(minute) + str.tostring(second) +
+    str.substring(syminfo.ticker, 0, 3) + str.substring(str.tostring(math.random(0, 999)),0,3)
+
+// --- ICT Model Logic ---
+
+// 2.1 Liquidity Sweep (Simplified: highest high / lowest low of lookbackSweep)
+// For a buy setup, we look for a sweep of a recent low.
+// For a sell setup, we look for a sweep of a recent high.
+lows = ta.lowest(low, lookbackSweep)
+highs = ta.highest(high, lookbackSweep)
+
+// Sweep of low: current low goes below the lowest low of the PREVIOUS `lookbackSweep` candles
+// Then price closes back above that swept low.
+sweptLowPrice = lows[1]
+sweepLowCond = low < sweptLowPrice[1] and close > sweptLowPrice[1]
+// plot(sweptLowPrice[1], "Swept Low Price", color.red, style=plot.style_circles)
+
+// Sweep of high: current high goes above the highest high of the PREVIOUS `lookbackSweep` candles
+// Then price closes back below that swept high.
+sweptHighPrice = highs[1]
+sweepHighCond = high > sweptHighPrice[1] and close < sweptHighPrice[1]
+// plot(sweptHighPrice[1], "Swept High Price", color.green, style=plot.style_circles)
+
+
+// 2.2 Break of Structure (BoS)
+// BoS Up: After a low sweep, price breaks above a recent significant swing high.
+// BoS Down: After a high sweep, price breaks below a recent significant swing low.
+swingHighLookback = input.int(10, "Swing High Lookback for BoS", group=GROUP_INPUTS)
+swingLowLookback = input.int(10, "Swing Low Lookback for BoS", group=GROUP_INPUTS)
+
+// Potential BoS up if a recent swing high is broken after a sweepLow
+// We define a swing high as a high with `swingHighLookback` lower highs on both sides.
+// For simplicity, we'll use ta.highest within a window after the sweep.
+// Let's refine BoS: A clear displacement move. We look for a high that is broken AFTER the sweep.
+var float lastSwingHighForBoS = na
+if sweepLowCond
+    lastSwingHighForBoS := ta.highest(high, swingHighLookback)[1] // Capture the high prior to the bar that completes the sweep for BoS target
+
+bosUp = sweepLowCond and close > lastSwingHighForBoS and not na(lastSwingHighForBoS)
+// plotshape(bosUp, "BoS Up", shape.triangleup, location.belowbar, color.new(color.green, 0), size=size.small)
+
+// Potential BoS down if a recent swing low is broken after a sweepHigh
+var float lastSwingLowForBoS = na
+if sweepHighCond
+    lastSwingLowForBoS := ta.lowest(low, swingLowLookback)[1] // Capture the low prior to the bar that completes the sweep for BoS target
+
+bosDown = sweepHighCond and close < lastSwingLowForBoS and not na(lastSwingLowForBoS)
+// plotshape(bosDown, "BoS Down", shape.triangledown, location.abovebar, color.new(color.red, 0), size=size.small)
+
+// 2.3 Order Block (OB) and Fair Value Gap (FVG)
+// FVG: A three-candle pattern where there's a gap between the wicks of the first and third candles.
+// Bullish FVG: low[2] > high[0], and middle candle is bullish OR has a large body.
+// Bearish FVG: high[2] < low[0], and middle candle is bearish OR has a large body.
+
+// Bullish FVG (Gap between high of candle 1 and low of candle 3)
+bullishFVG_bottom = low[1] // Potential bottom of FVG (low of 2nd candle)
+bullishFVG_top = high[1]   // Potential top of FVG (high of 2nd candle)
+isBullishFVG = high[2] < low[0] and close[1] > open[1] // More robust: gap exists, middle candle strong
+// For entry, we'd typically look for FVG between BoS and current price.
+// Simplified FVG check: look for an FVG formed recently.
+var float bullishFVGEntry = na
+var float bullishOBEntry = na
+
+if bosUp
+    // Look for Bullish FVG created recently (e.g. within last 5 bars after BoS)
+    // For simplicity, we'll use the FVG closest to the BoS candle, if available.
+    // This is a simplified FVG detection for alert purposes.
+    // A proper FVG would require checking the range of candles from BoS.
+    // Let's assume an FVG is present if there was a strong move causing BoS.
+    // We'll use the low of the BoS candle as a proxy for FVG/OB entry area.
+    // A more precise OB: Last bearish candle before the BoS move up.
+    // Find last down candle before BoS up
+    lastDownCandleIdx = 0
+    for i = 1 to 10 // Look back up to 10 candles from BoS candle
+        if close[i] < open[i] and high[i] < lastSwingHighForBoS // Ensure it's before the BoS high
+            lastDownCandleIdx := i
+            break
+    if lastDownCandleIdx > 0
+        bullishOBEntry := high[lastDownCandleIdx] // Top of the OB (bearish candle body or high)
+    else
+        bullishOBEntry := low[0] // Fallback to current low if no clear OB found
+
+    // Simple FVG: use the BoS candle's range or a fixed point.
+    // For this version, prioritize OB. If OB is too far, consider FVG (not fully implemented here for brevity).
+    // Simplified: Use the high of the last bearish candle as OB entry.
+    bullishFVGEntry := (low[0] + high[0]) / 2 // Fallback: Mid of current candle post BoS
+
+// Bearish FVG / OB
+var float bearishFVGEntry = na
+var float bearishOBEntry = na
+if bosDown
+    // Find last up candle before BoS down
+    lastUpCandleIdx = 0
+    for i = 1 to 10
+        if close[i] > open[i] and low[i] > lastSwingLowForBoS // Ensure it's before the BoS low
+            lastUpCandleIdx := i
+            break
+    if lastUpCandleIdx > 0
+        bearishOBEntry := low[lastUpCandleIdx] // Bottom of the OB (bullish candle body or low)
+    else
+        bearishOBEntry := high[0] // Fallback
+
+    bearishFVGEntry := (low[0] + high[0]) / 2 // Fallback
+
+
+// --- Entry Logic ---
+var float entryCandleLow = na
+var float entryCandleHigh = na
+
+// Check for entry conditions
+if tradeState == "IDLE" and isKillzone()
+    if bosUp
+        // Potential Buy Setup
+        // Entry: Mid-OB or FVG boundary. Simplified: use bullishOBEntry or bullishFVGEntry.
+        // Prioritize OB.
+        float possibleEntry = bullishOBEntry // Could also be bullishFVG_bottom or similar
+        float stopLoss = sweptLowPrice[1] - (syminfo.mintick * 2) // Below the swept low
+
+        // Apply riskPips for Gold
+        float calculatedRiskPips = (possibleEntry - stopLoss) / syminfo.mintick / syminfo.pointvalue
+        if syminfo.tickerid == "XAUUSD" and calculatedRiskPips > riskPipsGold
+            stopLoss := possibleEntry - (riskPipsGold * syminfo.mintick * syminfo.pointvalue)
+        else if syminfo.tickerid != "XAUUSD" and calculatedRiskPips > (ta.atr(atrLengthSL) * atrMultiplierSL / syminfo.mintick / syminfo.pointvalue)
+            // For non-gold, use ATR if calculated SL is too wide (example)
+            stopLoss := possibleEntry - (ta.atr(atrLengthSL) * atrMultiplierSL)
+
+
+        float riskAmount = possibleEntry - stopLoss
+        if riskAmount > 0 // Ensure valid risk
+            float targetTP1 = possibleEntry + riskAmount // 1R
+            // TP2: highest high after BoS (simplified: use a multiple or look for next swing high)
+            float targetTP2 = ta.highest(high, 20)[1] // Placeholder: recent high over 20 bars
+            if targetTP2 <= targetTP1 // Ensure TP2 is above TP1
+                targetTP2 := targetTP1 + riskAmount // Minimum 2R if no clear high
+
+            // Set Trade State
+            tradeState := "ACTIVE"
+            tradeId := newTradeId()
+            tradeSide := "BUY"
+            tradeEntryPrice := possibleEntry
+            tradeSL := stopLoss
+            tradeTP1 := targetTP1
+            tradeTP2 := targetTP2
+            tp1Hit := false
+            tradeStartTime := time
+            entryCandleLow := low
+            entryCandleHigh := high
+
+            alertMsg = "START|" + tradeId + "|" + tradeSymbol + "|" + tradeSide + "|" +
+                       str.tostring(tradeEntryPrice, "#.#####") + "|" + str.tostring(tradeSL, "#.#####") + "|" +
+                       str.tostring(tradeTP1, "#.#####") + "|" + str.tostring(tradeTP2, "#.#####")
+            alert(alertMsg, alert.freq_once_per_bar_close)
+
+    else if bosDown
+        // Potential Sell Setup
+        float possibleEntry = bearishOBEntry // Could also be bearishFVG_top
+        float stopLoss = sweptHighPrice[1] + (syminfo.mintick * 2) // Above the swept high
+
+        float calculatedRiskPips = (stopLoss - possibleEntry) / syminfo.mintick / syminfo.pointvalue
+        if syminfo.tickerid == "XAUUSD" and calculatedRiskPips > riskPipsGold
+            stopLoss := possibleEntry + (riskPipsGold * syminfo.mintick * syminfo.pointvalue)
+        else if syminfo.tickerid != "XAUUSD" and calculatedRiskPips > (ta.atr(atrLengthSL) * atrMultiplierSL / syminfo.mintick / syminfo.pointvalue)
+            stopLoss := possibleEntry + (ta.atr(atrLengthSL) * atrMultiplierSL)
+
+        float riskAmount = stopLoss - possibleEntry
+        if riskAmount > 0
+            float targetTP1 = possibleEntry - riskAmount // 1R
+            float targetTP2 = ta.lowest(low, 20)[1] // Placeholder: recent low over 20 bars
+            if targetTP2 >= targetTP1 // Ensure TP2 is below TP1
+                targetTP2 := targetTP1 - riskAmount // Minimum 2R if no clear low
+
+            tradeState := "ACTIVE"
+            tradeId := newTradeId()
+            tradeSide := "SELL"
+            tradeEntryPrice := possibleEntry
+            tradeSL := stopLoss
+            tradeTP1 := targetTP1
+            tradeTP2 := targetTP2
+            tp1Hit := false
+            tradeStartTime := time
+            entryCandleLow := low
+            entryCandleHigh := high
+
+            alertMsg = "START|" + tradeId + "|" + tradeSymbol + "|" + tradeSide + "|" +
+                       str.tostring(tradeEntryPrice, "#.#####") + "|" + str.tostring(tradeSL, "#.#####") + "|" +
+                       str.tostring(tradeTP1, "#.#####") + "|" + str.tostring(tradeTP2, "#.#####")
+            alert(alertMsg, alert.freq_once_per_bar_close)
+
+// --- Trade Management ---
+if tradeState == "ACTIVE" or tradeState == "HALF"
+    // Check for SL hit
+    if (tradeSide == "BUY" and low <= tradeSL) or (tradeSide == "SELL" and high >= tradeSL)
+        rr = tradeSide == "BUY" ? (tradeSL - tradeEntryPrice) / (tradeEntryPrice - tradeSL) : (tradeEntryPrice - tradeSL) / (tradeSL - tradeEntryPrice)
+        alertMsg = "CLOSE|" + tradeId + "|LOSS|" + str.tostring(rr, "#.##") + "R"
+        alert(alertMsg, alert.freq_once_per_bar_close)
+        tradeState := "CLOSED"
+        plot.text(tradeId + " SL Hit",x=bar_index, y=tradeSL, color=color.red, style=label.style_label_down)
+
+
+    // Check for TP1 hit
+    else if not tp1Hit and ((tradeSide == "BUY" and high >= tradeTP1) or (tradeSide == "SELL" and low <= tradeTP1))
+        tp1Hit := true
+        tradeState := "HALF" // Or keep as ACTIVE if preferred, SL is now breakeven
+        alertMsg = "TP1|" + tradeId
+        alert(alertMsg, alert.freq_once_per_bar_close)
+
+        // Move SL to Breakeven
+        if tradeSide == "BUY"
+            tradeSL := tradeEntryPrice + syminfo.mintick // Slightly above entry for BE
+        else // SELL
+            tradeSL := tradeEntryPrice - syminfo.mintick // Slightly below entry for BE
+        plot.text(tradeId + " TP1 Hit, SL to BE", x=bar_index,y=tradeTP1, color=color.orange, style=label.style_label_up)
+
+
+    // Check for TP2 hit (final TP)
+    else if tp1Hit and ((tradeSide == "BUY" and high >= tradeTP2) or (tradeSide == "SELL" and low <= tradeTP2))
+        rr = tradeSide == "BUY" ? (tradeTP2 - tradeEntryPrice) / (tradeEntryPrice - entryCandleLow) : (tradeEntryPrice - tradeTP2) / (entryCandleHigh - tradeEntryPrice)
+        // Note: Original SL was based on sweptlow/high, using entryCandleLow/High for R calculation for consistency if SL was adjusted by riskPipsGold
+        float initialRisk = tradeSide == "BUY" ? (tradeEntryPrice - (sweptLowPrice[1] - syminfo.mintick*2)) : ((sweptHighPrice[1] + syminfo.mintick*2) - tradeEntryPrice)
+        if initialRisk == 0 { initialRisk := 1 } // Avoid division by zero
+        float actualRR = tradeSide == "BUY" ? (tradeTP2 - tradeEntryPrice) / initialRisk : (tradeEntryPrice - tradeTP2) / initialRisk
+
+
+        alertMsg = "CLOSE|" + tradeId + "|WIN|" + str.tostring(actualRR, "#.##") + "R"
+        alert(alertMsg, alert.freq_once_per_bar_close)
+        tradeState := "CLOSED"
+        plot.text(tradeId + " TP2 Hit", x=bar_index,y=tradeTP2, color=color.green, style=label.style_label_up)
+
+    // Progress Alert (50% to TP1)
+    else if not tp1Hit and tradeState == "ACTIVE"
+        progress = 0.0
+        if tradeSide == "BUY" and high > tradeEntryPrice
+            progress := math.min(100, ((high - tradeEntryPrice) / (tradeTP1 - tradeEntryPrice)) * 100)
+        else if tradeSide == "SELL" and low < tradeEntryPrice
+            progress := math.min(100, ((tradeEntryPrice - low) / (tradeEntryPrice - tradeTP1)) * 100)
+
+        if progress >= 50 and progress < 100 // Send only once when 50% is crossed
+            // Check if already sent for this trade ID to avoid spamming
+            var lastProgressAlertTime = 0
+            if time > lastProgressAlertTime + (ta.timeframe.in_seconds() * 1 * 1000) // at least 1 bar passed
+                alertMsg = "PROGRESS|" + tradeId + "|" + str.tostring(progress, "#.##")
+                alert(alertMsg, alert.freq_once_per_bar_close) // Consider freq_once_per_bar to avoid multiple alerts if price hovers
+                lastProgressAlertTime := time // Update last alert time
+
+// Reset trade state after 20 bars in "CLOSED" to allow new trades (or use a different reset mechanism)
+var int closedBar = 0
+if tradeState == "CLOSED"
+    closedBar := bar_index
+if bar_index > closedBar + 5 and tradeState == "CLOSED" // Wait 5 bars after close
+    tradeState := "IDLE"
+    tradeId := na
+    tp1Hit := false
+    // Clear lines and labels (optional - they will persist until max_lines/labels is hit or script reloads)
+
+// --- Plotting for visual confirmation ---
+// Plot active trade levels
+plot(tradeState != "IDLE" and tradeSide == "BUY" ? tradeEntryPrice : na, "Buy Entry", color.new(color.blue,0), style=plot.style_linebr)
+plot(tradeState != "IDLE" and tradeSide == "SELL" ? tradeEntryPrice : na, "Sell Entry", color.new(color.blue,0), style=plot.style_linebr)
+plot(tradeState != "IDLE" ? tradeSL : na, "Stop Loss", color.new(color.red,0), style=plot.style_linebr)
+plot(tradeState != "IDLE" and not tp1Hit ? tradeTP1 : na, "TP1", color.new(color.orange,0), style=plot.style_linebr)
+plot(tradeState != "IDLE" and tp1Hit ? tradeTP1 : na, "TP1 (Hit)", color.new(color.gray,0), style=plot.style_linebr) // Keep TP1 line after hit
+plot(tradeState != "IDLE" ? tradeTP2 : na, "TP2", color.new(color.green,0), style=plot.style_linebr)
+
+// Display current state
+//bgcolor(tradeState == "ACTIVE" ? color.new(color.yellow, 80) : tradeState == "HALF" ? color.new(color.orange, 80) : na)

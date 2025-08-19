@@ -1,0 +1,80 @@
+{
+  "recommendations": [
+    {
+      "id": 1,
+      "asset": "XAU/USD",
+      "type": "BUY",
+      "entry_zone": "1942.50",
+      "target1": "1946.00",
+      "target1_confidence": 92,
+      "target2": "1952.00",
+      "target2_confidence": 87,
+      "stop_loss": "1939.80",
+      "strategies": {
+        "SMC": 90,
+        "InsiderTraders": 85,
+        "ICT": 92
+      },
+      "overall_confidence": 92,
+      "note": "الصفقة مبنية على كسر هيكلي + منطقة طلب قوية + FVG.",
+      "timestamp": "2023-10-27T10:00:00Z",
+      "status": "active"
+    },
+    {
+      "id": 2,
+      "asset": "EUR/USD",
+      "type": "SELL",
+      "entry_zone": "1.08500",
+      "target1": "1.08200",
+      "target1_confidence": 90,
+      "target2": "1.07850",
+      "target2_confidence": 85,
+      "stop_loss": "1.08750",
+      "strategies": {
+        "SMC": 88,
+        "ICT": 91
+      },
+      "overall_confidence": 91,
+      "note": "الصفقة مبنية على منطقة عرض قوية.",
+      "timestamp": "2023-10-27T11:30:00Z",
+      "status": "active"
+    }
+  ],
+  "performance_history": [
+    {
+      "date": "2023-10-26",
+      "asset": "XAU/USD",
+      "type": "BUY",
+      "result": "profit",
+      "pips": 35
+    },
+    {
+      "date": "2023-10-26",
+      "asset": "EUR/USD",
+      "type": "SELL",
+      "result": "profit",
+      "pips": 30
+    },
+    {
+      "date": "2023-10-25",
+      "asset": "US30",
+      "type": "BUY",
+      "result": "loss",
+      "pips": -50
+    }
+  ],
+  "subscribers": [
+      {
+        "id": "user123",
+        "telegram_chat_id": "123456789",
+        "tier": "paid",
+        "join_date": "2023-01-15"
+      },
+      {
+        "id": "user456",
+        "telegram_chat_id": "987654321",
+        "tier": "free",
+        "join_date": "2023-02-20"
+      }
+  ]
+}

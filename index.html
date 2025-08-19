@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>منصة توصيات التداول</title>
+
+    <!-- Google Fonts (Tajawal) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <!-- Chart.js for Performance Charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        /* --- General Variables and Styles --- */
+        :root {
+            --bg-light: #f4f7f9;
+            --bg-dark: #1c1c27;
+            --card-light: #ffffff;
+            --card-dark: #2a2a3a;
+            --text-light: #222;
+            --text-dark: #f1f1f1;
+            --primary-blue: #007bff;
+            --primary-gold: #ffc107;
+            --buy-green: #28a745;
+            --sell-red: #dc3545;
+            --buy-green-bg: rgba(40, 167, 69, 0.1);
+            --sell-red-bg: rgba(220, 53, 69, 0.1);
+            --border-light: #e3e6e9;
+            --border-dark: #404050;
+        }
+
+        body {
+            font-family: 'Tajawal', sans-serif;
+            margin: 0;
+            background-color: var(--bg-light);
+            color: var(--text-light);
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        body.dark-mode {
+            --bg-light: var(--bg-dark);
+            --card-light: var(--card-dark);
+            --text-light: var(--text-dark);
+            --border-light: var(--border-dark);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* --- Navbar --- */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 30px;
+            background-color: var(--card-light);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        .navbar .logo {
+            font-size: 1.5em;
+            font-weight: 700;
+            color: var(--primary-blue);
+        }
+        .navbar .nav-links {
+            list-style: none;
+            display: flex;
+            margin: 0;
+            padding: 0;
+        }
+        .navbar .nav-links li a {
+            padding: 10px 15px;
+            text-decoration: none;
+            color: var(--text-light);
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+        .navbar .nav-links li a:hover, .navbar .nav-links li a.active {
+            color: var(--primary-blue);
+        }
+        .navbar .nav-actions {
+            display: flex;
+            align-items: center;
+        }
+        .theme-switcher {
+            cursor: pointer;
+            font-size: 1.2em;
+            margin-left: 20px;
+        }
+
+        /* --- Content Sections --- */
+        .page-section {
+            display: none;
+        }
+        .page-section.active {
+            display: block;
+        }
+
+        /* --- Welcome Banner --- */
+        .welcome-banner {
+            text-align: center;
+            padding: 60px 20px;
+            background: linear-gradient(45deg, var(--primary-blue), var(--primary-gold));
+            color: white;
+            border-radius: 10px;
+            margin-bottom: 40px;
+        }
+        .welcome-banner h1 {
+            margin: 0;
+            font-size: 2.5em;
+        }
+
+        /* --- Asset Section --- */
+        .assets-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            gap: 30px;
+            min-height: 300px; /* To avoid layout shift while loading */
+        }
+        .asset-card {
+            background-color: var(--card-light);
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            border: 1px solid var(--border-light);
+        }
+        .asset-card h3 {
+            text-align: center;
+            margin-top: 0;
+            font-size: 1.5em;
+            color: var(--text-light);
+        }
+        .tradingview-widget-container {
+            height: 400px;
+            margin-bottom: 20px;
+        }
+
+        /* --- Recommendation Box --- */
+        .rec-box {
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .rec-box.buy {
+            background-color: var(--buy-green-bg);
+            border: 1px solid var(--buy-green);
+        }
+        .rec-box.sell {
+            background-color: var(--sell-red-bg);
+            border: 1px solid var(--sell-red);
+        }
+        .rec-box .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            font-weight: 700;
+            font-size: 1.2em;
+        }
+        .rec-box.buy .header { color: var(--buy-green); }
+        .rec-box.sell .header { color: var(--sell-red); }
+
+        .rec-box .details {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .rec-box .details li {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-light);
+        }
+        .rec-box .details li:last-child {
+            border-bottom: none;
+        }
+        .rec-box .details .label {
+            width: 150px;
+            font-weight: 500;
+        }
+        .rec-box .details .value {
+            font-weight: 700;
+        }
+        .value.buy { color: var(--buy-green); }
+        .value.sell { color: var(--sell-red); }
+
+        .rec-box .strategies { margin-top: 15px; }
+        .rec-box .strategies p { margin: 5px 0; }
+
+        .rec-box .confidence { margin-top: 15px; }
+        .rec-box .confidence-bar {
+            width: 100%;
+            height: 20px;
+            background-color: var(--border-light);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .rec-box .confidence-bar .progress {
+            height: 100%;
+            border-radius: 10px;
+            text-align: center;
+            color: white;
+            font-weight: bold;
+            line-height: 20px;
+        }
+        .rec-box.buy .progress { background-color: var(--buy-green); }
+        .rec-box.sell .progress { background-color: var(--sell-red); }
+
+        .rec-box .note {
+            margin-top: 15px;
+            font-style: italic;
+            font-size: 0.9em;
+            padding: 10px;
+            background-color: rgba(0,0,0,0.03);
+            border-radius: 5px;
+        }
+
+        /* --- Other Pages --- */
+        .page-content {
+            background-color: var(--card-light);
+            padding: 30px;
+            border-radius: 10px;
+            min-height: 50vh;
+        }
+        .page-content h2 {
+            margin-top: 0;
+            border-bottom: 2px solid var(--primary-blue);
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+
+        /* --- Subscription Page --- */
+        .plans-container {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+        .plan-card {
+            border: 1px solid var(--border-light);
+            border-radius: 10px;
+            padding: 30px;
+            width: 300px;
+            text-align: center;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .plan-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        .plan-card h3 { font-size: 1.8em; color: var(--primary-blue); }
+        .plan-card .price { font-size: 2.5em; font-weight: 700; margin: 20px 0; }
+        .plan-card ul { list-style: none; padding: 0; margin-bottom: 30px; }
+        .plan-card ul li { padding: 10px 0; }
+        .plan-card .btn {
+            background-color: var(--primary-blue);
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            text-decoration: none;
+            font-size: 1.1em;
+            cursor: pointer;
+        }
+        .plan-card.premium .btn {
+            background-color: var(--primary-gold);
+        }
+
+        /* --- Performance Page --- */
+        #performance-chart { max-height: 400px; margin-bottom: 30px; }
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .results-table th, .results-table td {
+            padding: 12px;
+            border: 1px solid var(--border-light);
+            text-align: center;
+        }
+        .results-table th {
+            background-color: #f0f0f0;
+            color: #333;
+        }
+        body.dark-mode .results-table th {
+            background-color: var(--card-dark);
+            color: var(--text-dark);
+        }
+
+        /* --- Contact Form --- */
+        .contact-form { max-width: 600px; margin: 0 auto; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 5px; }
+        .form-group input, .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid var(--border-light);
+            background-color: var(--bg-light);
+            color: var(--text-light);
+        }
+        .contact-form button {
+            background-color: var(--primary-blue);
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1.1em;
+        }
+
+        /* --- Responsive Design --- */
+        @media (max-width: 768px) {
+            .navbar .nav-links { display: none; /* Simple toggle can be added here */ }
+            .assets-grid { grid-template-columns: 1fr; }
+            .welcome-banner h1 { font-size: 2em; }
+        }
+
+    </style>
+</head>
+<body>
+
+    <header class="navbar">
+        <div class="logo">منصة التداول</div>
+        <ul class="nav-links">
+            <li><a href="#home" class="nav-item active">الرئيسية</a></li>
+            <li><a href="#subscriptions" class="nav-item">الاشتراكات</a></li>
+            <li><a href="#performance" class="nav-item">الأداء</a></li>
+            <li><a href="#strategies" class="nav-item">الاستراتيجيات</a></li>
+            <li><a href="#contact" class="nav-item">تواصل معنا</a></li>
+        </ul>
+        <div class="nav-actions">
+            <div class="theme-switcher" id="theme-switcher">
+                <i class="fas fa-moon"></i>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- =========== HOME PAGE =========== -->
+        <section id="home" class="page-section active">
+            <div class="welcome-banner">
+                <h1>توصيات احترافية لحركة السوق قبل حدوثها</h1>
+            </div>
+
+            <!-- Recommendations will be loaded here dynamically -->
+            <div class="assets-grid" id="assets-grid">
+                <!-- Dynamic content will be injected by JavaScript -->
+            </div>
+        </section>
+
+        <!-- =========== SUBSCRIPTIONS PAGE =========== -->
+        <section id="subscriptions" class="page-section">
+            <div class="page-content">
+                <h2>باقات الاشتراك</h2>
+                <p>اختر الباقة التي تناسبك واحصل على توصياتنا الدقيقة.</p>
+                <div class="plans-container">
+                    <div class="plan-card">
+                        <h3>الباقة المجانية</h3>
+                        <div class="price">مجاناً</div>
+                        <ul>
+                            <li><i class="fas fa-check-circle" style="color:var(--buy-green)"></i> توصيات مؤخرة 3 ساعات</li>
+                            <li><i class="fas fa-times-circle" style="color:var(--sell-red)"></i> تنبيهات تيليجرام مباشرة</li>
+                            <li><i class="fas fa-times-circle" style="color:var(--sell-red)"></i> تحميل تقارير الأداء</li>
+                            <li><i class="fas fa-times-circle" style="color:var(--sell-red)"></i> دعم فني محدود</li>
+                        </ul>
+                        <a href="#" class="btn">ابدأ الآن</a>
+                    </div>
+                    <div class="plan-card premium">
+                        <h3>الباقة المدفوعة</h3>
+                        <div class="price">$49<span style="font-size:0.4em">/شهرياً</span></div>
+                        <ul>
+                            <li><i class="fas fa-check-circle" style="color:var(--buy-green)"></i> توصيات مباشرة وفورية</li>
+                            <li><i class="fas fa-check-circle" style="color:var(--buy-green)"></i> تنبيهات تيليجرام مباشرة</li>
+                            <li><i class="fas fa-check-circle" style="color:var(--buy-green)"></i> تحميل تقارير الأداء</li>
+                            <li><i class="fas fa-check-circle" style="color:var(--buy-green)"></i> دعم فني مميز</li>
+                        </ul>
+                        <a href="#" class="btn">اشترك الآن</a>
+                        <div style="margin-top:15px; display:flex; justify-content:center; gap:15px; font-size:1.5em;">
+                            <i class="fab fa-paypal" title="PayPal"></i>
+                            <i class="fab fa-bitcoin" title="USDT"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- =========== PERFORMANCE PAGE =========== -->
+        <section id="performance" class="page-section">
+            <div class="page-content">
+                <h2>أداء التوصيات</h2>
+                <p>شفافية كاملة في عرض نتائجنا. الأرقام تتحدث عن نفسها.</p>
+                <canvas id="performance-chart"></canvas>
+                <button id="export-csv">تصدير إلى CSV <i class="fas fa-file-csv"></i></button>
+
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th>التاريخ</th>
+                            <th>الأصل</th>
+                            <th>نوع الصفقة</th>
+                            <th>النتيجة</th>
+                            <th>الربح/الخسارة (نقاط)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="performance-table-body">
+                        <!-- Data will be populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- =========== STRATEGIES PAGE =========== -->
+        <section id="strategies" class="page-section">
+            <div class="page-content">
+                <h2>الاستراتيجيات المعتمدة</h2>
+                <p>نعتمد على مزيج من أقوى الاستراتيجيات لتحليل السوق بدقة.</p>
+                <div class="strategy-item">
+                    <h3>1. SMC (Smart Money Concept)</h3>
+                    <p>مفهوم المال الذكي يركز على تتبع بصمات كبار اللاعبين في السوق (البنوك والمؤسسات المالية). نقوم بتحديد مناطق الطلب والعرض الرئيسية، ونبحث عن علامات الكسر الهيكلي (Break of Structure) وتجمعات السيولة (Liquidity Pools) للدخول مع الاتجاه القوي.</p>
+                </div>
+                 <div class="strategy-item">
+                    <h3>2. Insider Traders</h3>
+                    <p>هذه الاستراتيجية تعتمد على تحليل بيانات وتقارير مثل (Order Flow / COT Data) التي تظهر المراكز الصافية لكبار المتداولين والمؤسسات. عندما نرى تحولاً كبيراً في مراكزهم، فهذه إشارة قوية على اتجاه قادم.</p>
+                </div>
+                 <div class="strategy-item">
+                    <h3>3. ICT (Inner Circle Trader)</h3>
+                    <p>استراتيجية متقدمة تركز على نماذج محددة مثل فجوات القيمة العادلة (Fair Value Gap - FVG)، وكتل الأوامر (Order Blocks)، ونماذج تجميع وتصريف السيولة. هذه النماذج توفر نقاط دخول دقيقة ذات مخاطرة منخفضة.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- =========== CONTACT US PAGE =========== -->
+        <section id="contact" class="page-section">
+            <div class="page-content">
+                <h2>تواصل معنا</h2>
+                <p>نسعد باستقبال استفساراتكم ومقترحاتكم.</p>
+                <form class="contact-form">
+                    <div class="form-group">
+                        <label for="name">الاسم</label>
+                        <input type="text" id="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="email">البريد الإلكتروني</label>
+                        <input type="email" id="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="message">الرسالة</label>
+                        <textarea id="message" rows="6" required></textarea>
+                    </div>
+                    <button type="submit">إرسال</button>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const API_BASE_URL = 'http://127.0.0.1:5000';
+        let performanceChart = null;
+
+        // --- Theme Switcher ---
+        const themeSwitcher = document.getElementById('theme-switcher');
+        const body = document.body;
+        themeSwitcher.addEventListener('click', () => {
+            body.classList.toggle('dark-mode');
+            const icon = themeSwitcher.querySelector('i');
+            if (body.classList.contains('dark-mode')) {
+                icon.classList.remove('fa-moon');
+                icon.classList.add('fa-sun');
+            } else {
+                icon.classList.remove('fa-sun');
+                icon.classList.add('fa-moon');
+            }
+        });
+
+        // --- Page Navigation ---
+        const navItems = document.querySelectorAll('.nav-item');
+        const sections = document.querySelectorAll('.page-section');
+        navItems.forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                navItems.forEach(link => link.classList.remove('active'));
+                item.classList.add('active');
+
+                const targetId = item.getAttribute('href').substring(1);
+                sections.forEach(section => {
+                    section.classList.toggle('active', section.id === targetId);
+                });
+
+                if (targetId === 'performance') {
+                    fetchPerformanceData();
+                }
+            });
+        });
+
+        // --- Data Fetching and Rendering ---
+
+        function createRecommendationHTML(rec) {
+            const typeClass = rec.type.toLowerCase();
+            const headerIcon = typeClass === 'buy' ? 'fa-arrow-up' : 'fa-arrow-down';
+
+            let strategiesHTML = '';
+            for (const [name, confidence] of Object.entries(rec.strategies)) {
+                strategiesHTML += `<p>- ${name} تدعم بنسبة ${confidence}%</p>`;
+            }
+
+            return `
+                <div class="asset-card">
+                    <h3>${rec.asset}</h3>
+                    <div class="tradingview-widget-container">
+                        <div style="background:#eee; height:100%; display:flex; align-items:center; justify-content:center;">
+                            ويدجت TradingView لـ ${rec.asset}
+                        </div>
+                    </div>
+                    <div class="rec-box ${typeClass}">
+                        <div class="header">
+                            <span><i class="fas ${headerIcon}"></i> نوع الصفقة: ${rec.type}</span>
+                            <span>#${rec.asset.replace('/','')}</span>
+                        </div>
+                        <ul class="details">
+                            <li><span class="label">🎯 منطقة الدخول:</span> <span class="value">${rec.entry_zone}</span></li>
+                            <li><span class="label">🎯 الهدف الأول:</span> <span class="value">${rec.target1} (مضمون ${rec.target1_confidence}%)</span></li>
+                            <li><span class="label">🎯 الهدف الثاني:</span> <span class="value">${rec.target2} (مضمون ${rec.target2_confidence}%)</span></li>
+                            <li><span class="label">🛑 وقف الخسارة:</span> <span class="value">${rec.stop_loss}</span></li>
+                        </ul>
+                        <div class="strategies">
+                            <p><strong>📊 الاستراتيجية:</strong></p>
+                            ${strategiesHTML}
+                        </div>
+                        <div class="confidence">
+                            <p><strong>✅ نسبة نجاح الصفقة المتوقعة: ${rec.overall_confidence}%</strong></p>
+                            <div class="confidence-bar">
+                                <div class="progress" style="width: ${rec.overall_confidence}%;">${rec.overall_confidence}%</div>
+                            </div>
+                        </div>
+                        <div class="note">
+                            <p>🔍 <strong>ملاحظة:</strong> ${rec.note}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function fetchRecommendations() {
+            const grid = document.getElementById('assets-grid');
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/recommendations`);
+                if (!response.ok) throw new Error('Network response was not ok');
+                const recommendations = await response.json();
+
+                grid.innerHTML = ''; // Clear loader/placeholder
+                recommendations.forEach(rec => {
+                    grid.innerHTML += createRecommendationHTML(rec);
+                });
+            } catch (error) {
+                console.error('Failed to fetch recommendations:', error);
+                grid.innerHTML = '<p>حدث خطأ أثناء جلب التوصيات. يرجى التأكد من أن الخادم الخلفي يعمل.</p>';
+            }
+        }
+
+        async function fetchPerformanceData() {
+            const tableBody = document.getElementById('performance-table-body');
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/performance`);
+                 if (!response.ok) throw new Error('Network response was not ok');
+                const performanceData = await response.json();
+
+                // Populate table
+                tableBody.innerHTML = '';
+                performanceData.forEach(trade => {
+                    const resultClass = trade.result === 'profit' ? 'buy' : 'sell';
+                    const row = `
+                        <tr>
+                            <td>${trade.date}</td>
+                            <td>${trade.asset}</td>
+                            <td class="value ${resultClass}">${trade.type}</td>
+                            <td class="value ${resultClass}">${trade.result === 'profit' ? 'ربح' : 'خسارة'}</td>
+                            <td>${trade.pips > 0 ? '+' : ''}${trade.pips}</td>
+                        </tr>
+                    `;
+                    tableBody.innerHTML += row;
+                });
+
+                // Update chart
+                updatePerformanceChart(performanceData);
+
+            } catch (error) {
+                console.error('Failed to fetch performance data:', error);
+                tableBody.innerHTML = '<tr><td colspan="5">حدث خطأ أثناء جلب بيانات الأداء.</td></tr>';
+            }
+        }
+
+        function updatePerformanceChart(data) {
+            const ctx = document.getElementById('performance-chart').getContext('2d');
+
+            // Simple example: win rate per month
+            const monthlyStats = {}; // { 'YYYY-MM': { wins: 0, total: 0 } }
+            data.forEach(trade => {
+                const month = trade.date.substring(0, 7); // e.g., "2023-10"
+                if (!monthlyStats[month]) {
+                    monthlyStats[month] = { wins: 0, total: 0 };
+                }
+                monthlyStats[month].total++;
+                if (trade.result === 'profit') {
+                    monthlyStats[month].wins++;
+                }
+            });
+
+            const labels = Object.keys(monthlyStats).sort();
+            const winRates = labels.map(month => {
+                const stats = monthlyStats[month];
+                return (stats.wins / stats.total) * 100;
+            });
+
+            if (performanceChart) {
+                performanceChart.destroy();
+            }
+
+            performanceChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'نسبة النجاح الشهرية (%)',
+                        data: winRates,
+                        backgroundColor: 'rgba(0, 123, 255, 0.5)',
+                        borderColor: 'rgba(0, 123, 255, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: { y: { beginAtZero: true, max: 100 } },
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+
+        // --- Initial Load ---
+        fetchRecommendations();
+
+    });
+    </script>
+</body>
+</html>
